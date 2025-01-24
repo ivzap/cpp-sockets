@@ -4,6 +4,8 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <iostream>
+#include <chrono>
+
 
 /*
     Utility function for displaying a stack trace of the error stack
@@ -35,8 +37,6 @@ void openssl_discard_error(SSL *ssl, int ret){
 int openssl_get_error_reason(unsigned long error){
     return ERR_GET_REASON(error);
 }
-
-
 
 HttpSocket::HttpSocket(){
     ctx = nullptr;
@@ -113,6 +113,12 @@ bool HttpSocket::Connect(std::string& hostname, int port){
         throw std::runtime_error("SSL_connect failed: unable to establish SSL connection. Error: " + std::to_string(err));
     }
 
+    struct timeval timeout;
+    timeout.tv_sec = DEFAULT_READ_TIMEOUT_SEC;
+    timeout.tv_usec = DEFAULT_READ_TIMEOUT_USEC;
+
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+
     return true;
 }
 
@@ -136,10 +142,7 @@ int HttpSocket::Send(const char *payload, int size){
     return bytes_sent;
 }
 
-/*
-    NOTE: it can be assumed server abruptly close connections thus handle
-    when server does this... i.e follow chunked protocol
-*/
+
 int HttpSocket::Read(char *out, int size){
     if(sock == -1){
         throw std::runtime_error("read failed: couldn't read data from record buffer -> must establish connection first.");
@@ -161,11 +164,11 @@ int HttpSocket::Read(char *out, int size){
 }
 
 /*
-    Closes the socket connection while clearing the read buffer, sending its remaining
+    Closes the socket connection while clearing the ssl read buffer, sending its remaining
     contents to the supplied buffer "out" if needed. Note: if the remaining number of bytes
     exceeds the size provided then out will be treated as a circular buffer (writing wraps back around, overwriting content).
 */
-bool HttpSocket::Close(char *out, int size){
+int HttpSocket::Close(char *out, int size){
     if(sock == -1){
         throw std::runtime_error("close failed: couldnt close the socket -> active connection must be in-place.");
     }
@@ -175,12 +178,28 @@ bool HttpSocket::Close(char *out, int size){
         openssl_discard_error(ssl.get(), status);
     }
 
-    // TODO: add a timeout on waiting for the peer to send a close_notify message
-    // Block until we receive peers close_notify message (refer to openssl shutdown docs)
+    struct timeval timeout;
+    socklen_t optlen = sizeof(timeout);
+    getsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, &optlen);
+
     int j = 0, bytes_read = 0;
+    auto start = std::chrono::high_resolution_clock::now();
     while((bytes_read = SSL_read(ssl.get(), out+j, size-j)) > 0){
         j = (j + bytes_read) % size;
+        auto end = std::chrono::high_resolution_clock::now();
 
+        auto elapsed_time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+        suseconds_t total_us = timeout.tv_sec*1e6 + timeout.tv_usec;
+
+        total_us -= elapsed_time_us;
+
+        timeout.tv_sec = std::max<suseconds_t>(0, total_us / 1000000);
+        timeout.tv_usec = std::max<suseconds_t>(0, total_us % 1000000);
+
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+
+        start = std::chrono::high_resolution_clock::now();
     }
 
     if(bytes_read <= 0){
@@ -190,8 +209,22 @@ bool HttpSocket::Close(char *out, int size){
     close(sock);
     sock = -1;
 
-    return true;
+    return j;
 
+}
+
+void HttpSocket::SetReadTimeout(int seconds){
+    struct timeval read_timeout;
+    read_timeout.tv_sec = seconds;
+    read_timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&read_timeout, sizeof(read_timeout));
+}
+
+void HttpSocket::SetSendTimeout(int seconds){
+    struct timeval send_timeout;
+    send_timeout.tv_sec = seconds;
+    send_timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&send_timeout, sizeof(send_timeout));
 }
 
 HttpSocket::~HttpSocket(){

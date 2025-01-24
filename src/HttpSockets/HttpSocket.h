@@ -1,6 +1,9 @@
 #pragma
 
-#define SSL_MAX_RECORD_SIZE 16384
+#define SSL_MAX_RECORD_SIZE 1024//16384
+#define DEFAULT_READ_TIMEOUT_SEC 5
+#define DEFAULT_READ_TIMEOUT_USEC 0
+
 #include <string>
 #include <memory>
 #include <openssl/ssl.h>
@@ -42,7 +45,11 @@ public:
 
     int Read(char *out, int size);
 
-    bool Close(char* out, int size);
+    int Close(char* out, int size);
+
+    void SetReadTimeout(int seconds);
+
+    void SetSendTimeout(int seconds);
 
 private:
     int sock;
