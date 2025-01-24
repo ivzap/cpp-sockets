@@ -1,8 +1,8 @@
 #include <iostream>
 #include "HttpSocket.h"
-#include <cstring>  // For std::strstr
+#include <cstring>
 #include <thread>
-#include <unistd.h> // For sleep() function
+#include <unistd.h>
 
 int main(){
     HttpSocket socket;

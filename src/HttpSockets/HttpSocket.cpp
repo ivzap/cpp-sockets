@@ -122,6 +122,10 @@ bool HttpSocket::Connect(std::string& hostname, int port){
     return true;
 }
 
+/*
+    Sends a request specified by payload and of exactly size bytes. If
+    an error is detect it is thrown.
+*/
 int HttpSocket::Send(const char *payload, int size){
     if(sock == -1){
         throw std::runtime_error("send failed: couldn't send data -> must establish connection first.");
@@ -142,7 +146,11 @@ int HttpSocket::Send(const char *payload, int size){
     return bytes_sent;
 }
 
-
+/*
+    Reads min(bufferered_size, size) bytes from the socket buffer i.e if
+    buffered_size < size we will only read buffered_size bytes. If an error is detected
+    it is thrown.
+*/
 int HttpSocket::Read(char *out, int size){
     if(sock == -1){
         throw std::runtime_error("read failed: couldn't read data from record buffer -> must establish connection first.");
